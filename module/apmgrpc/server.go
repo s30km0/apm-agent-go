@@ -94,6 +94,58 @@ func NewUnaryServerInterceptor(o ...ServerOption) grpc.UnaryServerInterceptor {
 	}
 }
 
+// NewStreamServerInterceptor returns a grpc.StreamServerInterceptor that
+// traces gRPC requests with the given options.
+//
+func NewStreamServerInterceptor(o ...StreamServerOption) grpc.StreamServerInterceptor {
+	opts := streamServerOptions{
+		tracer:         apm.DefaultTracer,
+		recover:        false,
+		requestIgnorer: DefaultStreamServerRequestIgnorer(),
+	}
+	for _, o := range o {
+		o(&opts)
+	}
+	return func(
+		service interface{},
+		stream grpc.ServerStream,
+		info *grpc.StreamServerInfo,
+		handler grpc.StreamHandler,
+	) (err error) {
+
+		if !opts.tracer.Active() || opts.requestIgnorer(info) {
+			return handler(service, stream)
+		}
+
+		ctx := stream.Context()
+		tx, ctx := startTransaction(ctx, opts.tracer, info.FullMethod)
+		defer tx.End()
+
+		// TODO(axw) define context schema for RPC,
+		// including at least the peer address.
+
+		defer func() {
+			r := recover()
+			if r != nil {
+				e := opts.tracer.Recovered(r)
+				e.SetTransaction(tx)
+				e.Context.SetFramework("grpc", grpc.Version)
+				e.Handled = opts.recover
+				e.Send()
+				if opts.recover {
+					err = status.Errorf(codes.Internal, "%s", r)
+				} else {
+					panic(r)
+				}
+			}
+		}()
+
+		err = handler(service, stream)
+		setTransactionResult(tx, err)
+		return err
+	}
+}
+
 func startTransaction(ctx context.Context, tracer *apm.Tracer, name string) (*apm.Transaction, context.Context) {
 	var opts apm.TransactionOptions
 	if md, ok := metadata.FromIncomingContext(ctx); ok {
@@ -137,8 +189,16 @@ type serverOptions struct {
 	requestIgnorer RequestIgnorerFunc
 }
 
+type streamServerOptions struct {
+	tracer         *apm.Tracer
+	recover        bool
+	requestIgnorer StreamRequestIgnorerFunc
+}
+
 // ServerOption sets options for server-side tracing.
 type ServerOption func(*serverOptions)
+
+type StreamServerOption func(*streamServerOptions)
 
 // WithTracer returns a ServerOption which sets t as the tracer
 // to use for tracing server requests.
@@ -167,6 +227,8 @@ func WithRecovery() ServerOption {
 // RequestIgnorerFunc is the type of a function for use in
 // WithServerRequestIgnorer.
 type RequestIgnorerFunc func(*grpc.UnaryServerInfo) bool
+
+type StreamRequestIgnorerFunc func(*grpc.StreamServerInfo) bool
 
 // WithServerRequestIgnorer returns a ServerOption which sets r as the
 // function to use to determine whether or not a server request should

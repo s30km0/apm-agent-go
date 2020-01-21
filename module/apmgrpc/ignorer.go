@@ -29,12 +29,17 @@ import (
 var (
 	defaultServerRequestIgnorerOnce sync.Once
 	defaultServerRequestIgnorer     RequestIgnorerFunc = IgnoreNone
+	defaultStreamServerRequestIgnorer StreamRequestIgnorerFunc = StreamIgnoreNone
 )
 
 // DefaultServerRequestIgnorer returns the default RequestIgnorer to use in
 // handlers.
 func DefaultServerRequestIgnorer() RequestIgnorerFunc {
 	return defaultServerRequestIgnorer
+}
+
+func DefaultStreamServerRequestIgnorer() StreamRequestIgnorerFunc {
+	return defaultStreamServerRequestIgnorer
 }
 
 // NewRegexpRequestIgnorer returns a RequestIgnorerFunc which matches requests'
@@ -50,7 +55,20 @@ func NewRegexpRequestIgnorer(re *regexp.Regexp) RequestIgnorerFunc {
 	}
 }
 
+func NewRegexpStreamRequestIgnorer(re *regexp.Regexp) StreamRequestIgnorerFunc {
+	if re == nil {
+		panic("re == nil")
+	}
+	return func(r *grpc.StreamServerInfo) bool {
+		return re.MatchString(r.FullMethod)
+	}
+}
+
 // IgnoreNone is a RequestIgnorerFunc which ignores no requests.
 func IgnoreNone(*grpc.UnaryServerInfo) bool {
+	return false
+}
+
+func StreamIgnoreNone(*grpc.StreamServerInfo) bool {
 	return false
 }
