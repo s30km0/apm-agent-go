@@ -211,6 +211,15 @@ func WithTracer(t *apm.Tracer) ServerOption {
 	}
 }
 
+func WithTracerStream(t *apm.Tracer) StreamServerOption {
+	if t == nil {
+		panic("t == nil")
+	}
+	return func(o *streamServerOptions) {
+		o.tracer = t
+	}
+}
+
 // WithRecovery returns a ServerOption which enables panic recovery
 // in the gRPC server interceptor.
 //
@@ -220,6 +229,12 @@ func WithTracer(t *apm.Tracer) ServerOption {
 // to gRPC errors with the code gprc/codes.Internal.
 func WithRecovery() ServerOption {
 	return func(o *serverOptions) {
+		o.recover = true
+	}
+}
+
+func WithRecoveryStream() StreamServerOption {
+	return func(o *streamServerOptions) {
 		o.recover = true
 	}
 }
